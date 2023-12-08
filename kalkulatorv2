@@ -1,0 +1,18 @@
+print("kalkulator")
+print("dodawanie")
+print("odejmowanie")
+print("mnożenie")
+print("dzielenie")
+a=int(input("podaj liczbe"))
+b=int(input("podaj liczbe"))
+dzialanie= input("wybierz dzialanie")
+if dzialanie == "1":
+    print(a+b)
+elif dzialanie == "2":
+    print(a-b)
+elif dzialanie == "3":
+    print(a*b)
+elif dzialanie == "4":
+    print(a/b)
+else:
+    print("nie ma takiego dzialania")
