@@ -1,0 +1,5 @@
+a=int(input("podaj rok urodzenia"))
+if a<=2009:
+   print("hghgjhg")
+else:
+    print("ggg")
