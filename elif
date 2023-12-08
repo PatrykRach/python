@@ -1,0 +1,6 @@
+a=int(input("Podaj a"))
+b=int(input("Podaj a"))
+if a>b:
+    print(a-b)
+elif a>b:
+    print(a+b)
