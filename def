@@ -1,0 +1,14 @@
+a=int(input("podaj a"))
+b=int(input("podaj b"))
+def dodawanie(a,b):
+    return(a+b)
+print (dodawanie(a,b))
+def odejmowanie(a,b):
+    return(a-b)
+print (odejmowanie(a,b))
+def mnożenie(a,b):
+    return(a*b)
+print (mnożenie(a,b))
+def dzielenie(a,b):
+    return(a/b)
+print(dzielenie(a,b))
