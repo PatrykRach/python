@@ -1,0 +1,14 @@
+a=int(0)
+b=int(1)
+c=int(2)
+print(a)
+print(a+b)
+for i in range(0,1):
+    print(b)
+print(b+b)
+for i in range(0,1):
+    print(b+2)
+print(b+c+c)
+for i in range(0,1):
+    print(b+7)
+    
