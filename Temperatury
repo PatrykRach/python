@@ -1,0 +1,2 @@
+a=int(input("podaj temperature celciusza"))
+print(32+9/5*a)
