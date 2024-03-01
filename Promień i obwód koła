@@ -1,0 +1,5 @@
+a=int(input("podaj wartość promienia"))
+pi=3.14
+c=(a*a)
+P=print(pi*c)
+L=print(2*pi*a)
