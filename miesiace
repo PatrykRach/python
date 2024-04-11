@@ -1,0 +1,9 @@
+m= input("podaj miesiac")
+if m == "marzec" or m == "kwiecien" or m == "maj":
+    print("wiosna")
+elif m== "czerwiec" or m == "lipiec" or m == "sierpien":
+    print("lato")
+elif m== "wrzesien" or m == "pazdziernik" or m == "listopad":
+    print("jesien")
+elif m== "grudzien" or m == "styczen" or m == "luty":
+    print("zima")
