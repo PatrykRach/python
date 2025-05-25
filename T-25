@@ -1,0 +1,17 @@
+# najpierw trzeba zainstalować wikipedie i wyszukiwanie googla (pip install googlesearch-python) (pip install wikipedia)
+import wikipedia
+from googlesearch import search 
+
+pytanie=str(input("co potrzebujesz wiedzieć?"))
+
+wikipedia.set_lang("pl")  # ustawienie języka na polski
+try:
+    odpowiedz = wikipedia.summary(pytanie) #zapytanie to pobranie wyniku programowania
+    print(odpowiedz)
+except wikipedia.exceptions.PageError:
+      for link in search(pytanie, num_results=5, lang="pl"):
+          print(link)
+except wikipedia.exceptions.DisambiguationError as e:
+    print("\nZbyt ogólne pytanie. Wybierz jedną z opcji:\n")
+    for opcja in e.options[:5]:
+        print(" -", opcja)
