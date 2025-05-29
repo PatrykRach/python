@@ -1,0 +1,34 @@
+#pip install requests
+#pip install beautifulsoup4
+#pip install googlesearch-python
+
+import time
+import requests
+from bs4 import BeautifulSoup
+from googlesearch import search
+
+zapytanie = str(input("co chcesz wiedzieć")).lower() #lower to małe litery
+klucz = zapytanie.split() # split rozdziela zdania np. jebac cie ---> "jebac", "cie"
+for i in search(zapytanie, num_results=30, lang="pl"):
+    try:
+        pob_strona = requests.get(i, timeout=5)
+        soup = BeautifulSoup(pob_strona.text, 'html.parser')
+        tekst = soup.get_text().lower()
+        zdania = tekst.split('.') #dzieli tekst po kropce
+        
+        odpowiedzi = []
+        for zdanie in zdania:
+            if any(slowo in zdanie for slowo in klucz): #generator zdan kluczowych które szuka ich w tekscie
+                odpowiedzi.append(zdanie.strip()) # jesli warunek sie spelni to dodajesz zdanie do losty odpowiedzi a strip usuwa spacje z poczatku i konca zdania
+        if odpowiedzi:
+            print(f"\nSłowa kluczowe znalezione na stronie {i}:\n")
+            for odp in odpowiedzi[:5]:  # pokaż max 5 zdań
+                print(f"- {odp}.")
+        else:
+            print(f"\nBrak pasujących zdań na stronie {i}")
+       
+       
+        time.sleep(1)     
+    
+    except Exception as e:
+        print(f"bład podczas ładowania strony frajerze{i}: {e}")
