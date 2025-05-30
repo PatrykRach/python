@@ -1,0 +1,51 @@
+#pip install requests
+#pip install beautifulsoup4
+#pip install googlesearch-python
+
+import time
+import requests
+from bs4 import BeautifulSoup
+from googlesearch import search
+
+def wybierz_najlepsza_odpowiedz(zdania, klucz):
+    maks_punkty = 0
+    najlepsze = ""
+    for zdanie in zdania:
+        punkty = sum(zdanie.count(slowo) for slowo in klucz)
+        if punkty > maks_punkty:
+            maks_punkty = punkty
+            najlepsze = zdanie
+    return najlepsze
+
+zapytanie = str(input("co chcesz wiedzieć")).lower() #lower to małe litery
+klucz = zapytanie.split() # split rozdziela zdania np. jebac cie ---> "jebac", "cie"
+
+for i in search(zapytanie, num_results=20, lang="pl"):
+    try:
+        pob_strona = requests.get(i, timeout=2)
+        soup = BeautifulSoup(pob_strona.text, 'html.parser')
+        tekst = soup.get_text().lower()
+        zdania = tekst.split('.') #dzieli tekst po kropce
+        
+        odpowiedzi = []
+        for zdanie in zdania:
+            if any(slowo in zdanie for slowo in klucz): #generator zdan kluczowych które szuka ich w tekscie
+                odpowiedzi.append(zdanie.strip()) # jesli warunek sie spelni to dodajesz zdanie do losty odpowiedzi a strip usuwa spacje z poczatku i konca zdania
+        
+        if odpowiedzi:
+            print(f"\nSłowa kluczowe znalezione na stronie {i}:\n")
+            for odp in odpowiedzi[:5]:  # pokaż max 5 zdań
+                 print(f"- {odp}.")
+         
+            najlepsza = wybierz_najlepsza_odpowiedz(odpowiedzi[:5], klucz)
+            if najlepsza:
+                print(f"\n💡 Najbardziej trafne gówno to": {najlepsza}.")       
+        
+        else:
+            print(f"\nBrak pasujących zdań na stronie {i}")
+       
+       
+        time.sleep(0.2)     
+    
+    except Exception as e:
+        print(f"bład podczas ładowania strony frajerze{i}: {e}")
