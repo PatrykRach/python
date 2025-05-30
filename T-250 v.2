@@ -33,7 +33,7 @@ for i in search(zapytanie, num_results=20, lang="pl"):
                 odpowiedzi.append(zdanie.strip()) # jesli warunek sie spelni to dodajesz zdanie do losty odpowiedzi a strip usuwa spacje z poczatku i konca zdania
         
         if odpowiedzi:
-            print(f"\nSłowa kluczowe znalezione na stronie {i}:\n")
+            print(f"\n Słowa kluczowe znalezione na stronie {i}:\n")
             for odp in odpowiedzi[:5]:  # pokaż max 5 zdań
                  print(f"- {odp}.")
          
@@ -42,7 +42,7 @@ for i in search(zapytanie, num_results=20, lang="pl"):
                 print(f"\n Najbardziej trafne gówno to": {najlepsza}.")       
         
         else:
-            print(f"\nBrak pasujących zdań na stronie {i}")
+            print(f"\n Brak pasujących zdań na stronie {i}")
        
        
         time.sleep(0.2)     
