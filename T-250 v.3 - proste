@@ -1,0 +1,76 @@
+#pip install requests
+#pip install beautifulsoup4
+#pip install googlesearch-python
+#pip install pyspellchecker
+
+import time
+import requests
+from bs4 import BeautifulSoup
+from googlesearch import search
+from spellchecker import SpellChecker
+import re
+
+def wybierz_najlepsza_odpowiedz(zdania, klucz):
+    maks_punkty = 0
+    najlepsze = ""
+    for zdanie in zdania:
+        punkty = sum(zdanie.count(slowo) for slowo in klucz)
+        if punkty > maks_punkty:
+            maks_punkty = punkty
+            najlepsze = zdanie
+    return najlepsze
+
+
+zapytanie = str(input("co chcesz wiedzieć")).lower() #lower to małe litery
+# Korekta literówek
+zapytanie = re.sub(r'[^a-zA-Z0-9ąćęłńóśźżĄĆĘŁŃÓŚŹŻ\s]', '', zapytanie)
+if not zapytanie.strip():
+    print("Sprecyzuj pytanie - usuń znaki specjalne.")
+    exit()
+spell = SpellChecker(language='pl')
+oryginalne_slowa = zapytanie.split()
+klucz = [spell.correction(slowo) for slowo in oryginalne_slowa]
+
+# Zabezpieczenie: zapytanie musi zawierać min. 2 słowa
+if len(klucz) < 2:
+    print("twoje pytanie jest zbyt krótkie lub niejednoznaczne. Dodaj więcej słów.")
+    exit()
+
+
+for i in search(zapytanie, num_results=20, lang="pl"):
+    try:
+        pob_strona = requests.get(i, timeout=2)
+        
+        if pob_strona.status_code == 404:
+            print(f"Strona {i} nie istnieje (404 Not Found). Pomijam...")
+            continue
+        elif pob_strona.status_code != 200:
+            print(f"Strona {i} zwróciła błąd HTTP {pob_strona.status_code}. Pomijam...")
+            continue
+        
+        pob_strona.encoding = 'utf-8'  # to rozwiązuje problem polskich znaków
+        soup = BeautifulSoup(pob_strona.text, 'html.parser')
+        tekst = soup.get_text().lower()
+        zdania = tekst.split('.') #dzieli tekst po kropce
+        
+        odpowiedzi = []
+        for zdanie in zdania:
+            if any(slowo in zdanie for slowo in klucz): #generator zdan kluczowych które szuka ich w tekscie
+                odpowiedzi.append(zdanie.strip()) # jesli warunek sie spelni to dodajesz zdanie do losty odpowiedzi a strip usuwa spacje z poczatku i konca zdania
+        
+        if odpowiedzi:
+            print(f"\nSłowa kluczowe znalezione na stronie {i}:\n")
+            for odp in odpowiedzi[:5]:  # pokaż max 5 zdań
+                 print(f"- {odp}.")
+         
+            najlepsza = wybierz_najlepsza_odpowiedz(odpowiedzi[:5], klucz)
+            if najlepsza:
+                print(f"\n Najbardziej trafne gówno to: {najlepsza}.")       
+        
+        else:
+            print(f"\nBrak pasujących zdań na stronie {i}")
+       
+       
+        time.sleep(0.2)     
+    except Exception as e:
+        print(f"bład podczas ładowania strony frajerze{i}: {e}")
