@@ -1,0 +1,145 @@
+#pip install requests
+#pip install beautifulsoup4
+#pip install googlesearch-python
+#pip install pyspellchecker
+#pip install nltk
+
+import time
+import requests
+from bs4 import BeautifulSoup
+from googlesearch import search
+from spellchecker import SpellChecker
+import re
+import difflib
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from sympy import sympify, sqrt
+from sympy.core.sympify import SympifyError
+from nltk.tokenize import sent_tokenize
+nltk.download('punkt')
+nltk.download('stopwords')
+
+def wybierz_najlepsza_odpowiedz(zdania, zapytanie):
+    najlepsze = ""
+    maks_sim = 0
+    for zdanie in zdania:
+        sim = difflib.SequenceMatcher(None, zdanie, zapytanie).ratio()
+        if sim > maks_sim:
+            maks_sim = sim
+            najlepsze = zdanie
+    return najlepsze
+import re
+from sympy import sympify, sqrt
+from sympy.core.sympify import SympifyError
+
+def czy_dzialanie_matematyczne(zapytanie):
+    return bool(re.search(r'\d', zapytanie)) and (
+        any(op in zapytanie for op in ['+', '-', '*', '/', '**', 'sqrt']) or
+        'pierwiastek' in zapytanie or 'potęga' in zapytanie
+    )
+
+def przetworz_zapytanie_na_wyrazenie(zapytanie):
+    zapytanie = zapytanie.lower()
+    zapytanie = zapytanie.replace('do potęgi', '**')
+    zapytanie = zapytanie.replace('potęga', '**')
+    zapytanie = re.sub(r'pierwiastk\w*\s+z\s*', 'sqrt(', zapytanie)
+    zapytanie = re.sub(r'sqrt\((\d+)\)', r'sqrt(\1)', zapytanie)
+
+    if 'sqrt(' in zapytanie and not zapytanie.endswith(')'):
+        zapytanie += ')'
+
+    # Zabezpieczenie przed niepożądanymi znakami
+    dozwolone = set('0123456789+-*/(). sqrt')
+    if not all(c in dozwolone for c in zapytanie.replace('**', '')):
+        print("Niedozwolone znaki w działaniu.")
+        exit()
+
+    return zapytanie
+
+#  Wczytanie pytania użytkownika
+zapytanie = str(input("co chcesz wiedzieć")).lower()
+
+#  Sprawdzenie, czy to działanie matematyczne
+if czy_dzialanie_matematyczne(zapytanie):
+    try:
+        wyrazenie = przetworz_zapytanie_na_wyrazenie(zapytanie)
+        wynik = sympify(wyrazenie).evalf()
+        print(f"Wynik tego gówna to: {wynik}")
+        exit()
+    except SympifyError:
+        print("nie umiem policzyć tego gówna")
+        exit()
+
+#  Kontynuuj jak wcześniej – czyszczenie zapytania itd.
+zapytanie = re.sub(r'[^a-zA-Z0-9ąćęłńóśźżĄĆĘŁŃÓŚŹŻ\s]', '', zapytanie)
+
+
+if not zapytanie.strip():
+    print("Sprecyzuj pytanie - usuń znaki specjalne.")
+    exit()
+spell = SpellChecker(language='pl')
+oryginalne_slowa = zapytanie.split()
+stop_slowa = {'i', 'oraz', 'to', 'że', 'a', 'ale', 'na', 'w', 'z', 'do'}
+
+stop_words = set(stopwords.words('polish'))
+words = word_tokenize(zapytanie)
+klucz = []
+for w in words:
+    if w.lower() not in stop_words:
+        if len(w) > 2 and not w.isdigit():
+            klucz.append(spell.correction(w))
+        else:
+            klucz.append(w)
+frazy = ['definicja', 'przykład', 'co to jest', 'oznacza']
+
+
+# Zabezpieczenie: zapytanie musi zawierać min. 2 słowa
+if len(klucz) < 2:
+    print("twoje pytanie jest zbyt krótkie lub niejednoznaczne. Dodaj więcej słów.")
+    exit()
+
+
+for i in search(zapytanie, num_results=20, lang="pl"):
+    try:
+        pob_strona = requests.get(i, timeout=2)
+        
+        if pob_strona.status_code == 404:
+            print(f"Strona {i} nie istnieje (404 Not Found). Pomijam...")
+            continue
+        elif pob_strona.status_code != 200:
+            print(f"Strona {i} zwróciła błąd HTTP {pob_strona.status_code}. Pomijam...")
+            continue
+        
+        pob_strona.encoding = 'utf-8'  # to rozwiązuje problem polskich znaków
+        soup = BeautifulSoup(pob_strona.text, 'html.parser')
+        tekst = soup.get_text().lower()
+        zdania = sent_tokenize(tekst, language='polish')
+        
+        odpowiedzi = []
+        for zdanie in zdania:
+            if any(slowo in zdanie for slowo in klucz): #generator zdan kluczowych które szuka ich w tekscie
+                odpowiedzi.append(zdanie.strip()) # jesli warunek sie spelni to dodajesz zdanie do losty odpowiedzi a strip usuwa spacje z poczatku i konca zdania
+          
+        for zdanie in zdania:
+            if any(fraza in zdanie for fraza in frazy):
+                odpowiedzi.append(zdanie.strip())
+                
+        odpowiedzi = list(set(odpowiedzi))
+        
+        if odpowiedzi:
+            print(f"\nSłowa kluczowe znalezione na stronie {i}:\n")
+            for odp in odpowiedzi[:5]:  # pokaż max 5 zdań
+                 print(f"- {odp}.")
+         
+            najlepsza = wybierz_najlepsza_odpowiedz(odpowiedzi[:5], zapytanie)
+            if najlepsza:
+                print(f"\n Najbardziej trafne gówno to: {najlepsza}.")       
+        
+        else:
+            print(f"\nBrak pasujących zdań na stronie {i}")
+       
+       
+        time.sleep(0.2)     
+    except Exception as e:
+        print(f"bład podczas ładowania strony frajerze{i}: {e}")
