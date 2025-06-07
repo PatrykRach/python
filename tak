@@ -1,0 +1,127 @@
+import time
+import requests
+from bs4 import BeautifulSoup
+from googlesearch import search
+from spellchecker import SpellChecker
+import re
+import difflib
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize, sent_tokenize
+from sympy import sympify, sqrt
+from sympy.core.sympify import SympifyError
+
+# Pobierz zasoby nltk
+nltk.download('punkt')
+nltk.download('stopwords')
+
+# Funkcja sprawdzająca, czy to działanie matematyczne
+def czy_dzialanie_matematyczne(zapytanie):
+    return bool(re.search(r'\d', zapytanie)) and (
+        any(op in zapytanie for op in ['+', '-', '*', '/', '**', 'sqrt']) or
+        'pierwiastek' in zapytanie or 'potęga' in zapytanie
+    )
+
+# Przetwarzanie działania matematycznego
+def przetworz_zapytanie_na_wyrazenie(zapytanie):
+    zapytanie = zapytanie.lower()
+    zapytanie = zapytanie.replace('do potęgi', '**')
+    zapytanie = zapytanie.replace('potęga', '**')
+    zapytanie = re.sub(r'pierwiastk\w*\s+z\s*', 'sqrt(', zapytanie)
+    zapytanie = re.sub(r'sqrt\((\d+)\)', r'sqrt(\1)', zapytanie)
+
+    if 'sqrt(' in zapytanie and not zapytanie.endswith(')'):
+        zapytanie += ')'
+
+    dozwolone = set('0123456789+-*/(). sqrt')
+    if not all(c in dozwolone for c in zapytanie.replace('**', '')):
+        print("Niedozwolone znaki w działaniu.")
+        exit()
+
+    return zapytanie
+
+# Funkcja do wyboru najlepszego zdania
+def wybierz_najlepsze(zdania, zapytanie):
+    return max(zdania, key=lambda zd: difflib.SequenceMatcher(None, zd, zapytanie).ratio(), default="")
+
+# Funkcja podsumowania na podstawie 5 zdań
+def podsumuj(zdania):
+    if not zdania:
+        return "Brak wystarczających danych do podsumowania."
+    wszystkie_slowa = ' '.join(zdania)
+    zdania_kandydat = sent_tokenize(wszystkie_slowa, language='polish')
+    return wybierz_najlepsze(zdania_kandydat, wszystkie_slowa)
+
+# Pytanie użytkownika
+zapytanie = input("Co chcesz wiedzieć? ").lower().strip()
+
+if not re.search(r'[a-zA-Ząćęłńóśźż]', zapytanie):
+    print("Twoje pytanie nie zawiera liter. Spróbuj jeszcze raz.")
+    exit()
+
+if czy_dzialanie_matematyczne(zapytanie):
+    try:
+        wyrazenie = przetworz_zapytanie_na_wyrazenie(zapytanie)
+        wynik = sympify(wyrazenie).evalf()
+        print(f"Wynik: {wynik}")
+        exit()
+    except SympifyError:
+        print("Nie udało się policzyć tego działania.")
+        exit()
+
+zapytanie = re.sub(r'[^a-zA-Z0-9ąćęłńóśźżĄĆĘŁŃÓŚŹŻ\s]', '', zapytanie)
+
+spell = SpellChecker(language='pl')
+stop_words = set(stopwords.words('polish'))
+slowa = word_tokenize(zapytanie)
+kluczowe = [spell.correction(w) if len(w) > 2 and not w.isdigit() and w not in stop_words else w for w in slowa]
+
+if len(kluczowe) < 2:
+    print("Twoje pytanie jest zbyt krótkie lub niejednoznaczne.")
+    exit()
+
+frazy = ['definicja', 'przykład', 'co to jest', 'oznacza']
+wszystkie_odpowiedzi = []
+
+# Szukanie w Google
+for url in search(zapytanie, num_results=20, lang="pl"):
+    try:
+        r = requests.get(url, timeout=4)
+        if r.status_code != 200:
+            continue
+        r.encoding = 'utf-8'
+        soup = BeautifulSoup(r.text, 'html.parser')
+        tekst = soup.get_text().lower()
+        zdania = sent_tokenize(tekst, language='polish')
+
+        dopasowane = [
+            zdanie.strip() for zdanie in zdania
+            if any(klucz in zdanie for klucz in kluczowe + frazy)
+        ]
+        wszystkie_odpowiedzi.extend(dopasowane)
+        time.sleep(0.3)
+
+    except Exception as e:
+        print(f"Błąd ładowania {url}: {e}")
+
+# Usuwanie duplikatów
+wszystkie_odpowiedzi = list(set(wszystkie_odpowiedzi))
+
+if not wszystkie_odpowiedzi:
+    print("Nie znaleziono żadnych trafnych odpowiedzi.")
+    exit()
+
+# Wybierz top 5 najbardziej trafnych
+trafne_top5 = sorted(
+    wszystkie_odpowiedzi,
+    key=lambda zd: difflib.SequenceMatcher(None, zd, zapytanie).ratio(),
+    reverse=True
+)[:5]
+
+print("\n Najtrafniejsze odpowiedzi:\n")
+for zd in trafne_top5:
+    print(f"- {zd}.")
+
+# Podsumowanie
+podsumowanie = podsumuj(trafne_top5)
+print(f"\n Podsumowanie: {podsumowanie}")
