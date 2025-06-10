@@ -1,0 +1,218 @@
+import re
+import json
+import requests
+from bs4 import BeautifulSoup
+from googlesearch import search
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from difflib import SequenceMatcher
+
+PLIK_OPINII = "opinie.json"
+
+STOPWORDS_POLSKIE = {
+    'a', 'aby', 'ach', 'acz', 'aczkolwiek', 'aj', 'albo', 'ale', 'ależ', 'ani', 'aż',
+    'bardziej', 'bardzo', 'bo', 'bowiem', 'by', 'być', 'byli', 'bym', 'bywa', 'bywało',
+    'było', 'były', 'chociaż', 'czy', 'czyli', 'dla', 'do', 'gdy', 'gdyby', 'gdyż',
+    'i', 'ich', 'ile', 'im', 'inny', 'inne', 'innych', 'iż', 'ja', 'jak', 'jaka', 'jakby',
+    'jakie', 'jakiś', 'jako', 'je', 'jeden', 'jedna', 'jednak', 'jednakże', 'jego',
+    'jej', 'jemu', 'jest', 'jestem', 'jestes', 'jestesmy', 'jestli', 'jeśli',
+    'jeżeli', 'już', 'ją', 'każdy', 'kiedy', 'kimś', 'koło', 'lecz', 'lub', 'ma', 'mają',
+    'mam', 'mi', 'mną', 'mnie', 'mogą', 'moi', 'moim', 'może', 'można', 'mój', 'mu',
+    'my', 'na', 'nad', 'nam', 'nami', 'nas', 'nasi', 'nasz', 'nasza', 'nasze', 'naszego',
+    'naszych', 'nie', 'nic', 'nich', 'niech', 'niego', 'niej', 'niemu', 'nigdy', 'nim',
+    'nimi', 'niż', 'no', 'o', 'obok', 'od', 'około', 'on', 'ona', 'one', 'oni', 'ono',
+    'oraz', 'oto', 'po', 'pod', 'ponieważ', 'ponownie', 'poza', 'póki', 'przed', 'przede',
+    'przez', 'przy', 'również', 'sam', 'sama', 'się', 'skąd', 'są', 'ta', 'tak', 'taka',
+    'taki', 'takie', 'także', 'tam', 'te', 'tego', 'tej', 'temu', 'ten', 'teraz', 'też',
+    'to', 'tobie', 'tobą', 'toteż', 'trzeba', 'tu', 'tutaj', 'twoi', 'twoim', 'twój',
+    'ty', 'tych', 'tylko', 'tym', 'u', 'w', 'wam', 'wami', 'was', 'wasz', 'we', 'według',
+    'więc', 'więcej', 'wszyscy', 'wszystkich', 'wszystkie', 'wszystkim', 'wszystko',
+    'wtedy', 'wy', 'z', 'za', 'zapewne', 'ze', 'znowu', 'znów', 'został', 'żaden', 'że',
+    'żeby', 'żadna', 'żadne'
+}
+
+POPULARNE_SLOWA = {
+    "piotr", "żyła", "zdjęcie", "fotosynteza", "matematyka", "działanie", "liczyć",
+    "co", "to", "jest", "jak", "kiedy", "gdzie", "dlaczego", "czy", "kim", "kto",
+    "gdzieś", "coś", "może", "można", "nie", "tak", "bardzo", "dobrze", "źródło", "informacja",
+    "programowanie", "python", "komputer", "raspberry", "pi", "system", "użytkownik"
+}
+
+def oczysc_tekst(tekst):
+    tekst = tekst.lower()
+    tekst = re.sub(r'[^\w\sąćęłńóśźż]', '', tekst)
+    return tekst.strip()
+
+def wczytaj_opinie():
+    try:
+        with open(PLIK_OPINII, "r", encoding="utf-8") as plik:
+            return json.load(plik)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"dobre": {}, "zle": {}}
+
+def zapisz_opinie(dane):
+    with open(PLIK_OPINII, "w", encoding="utf-8") as plik:
+        json.dump(dane, plik, indent=2, ensure_ascii=False)
+
+def czy_dzialanie(query):
+    if re.fullmatch(r'[\d\s\.\+\-\*\/\(\)eE,]+', query):
+        return True
+    return False
+
+def wykonaj_dzialanie(query):
+    try:
+        wyrazenie = query.replace(',', '.').replace(' ', '')
+        dozwolone = "0123456789+-*/().eE"
+        if not all(c in dozwolone for c in wyrazenie):
+            return None
+        wynik = eval(wyrazenie, {"__builtins__": None}, {})
+        return wynik
+    except:
+        return None
+
+def usun_znaki_polskie(tekst):
+    mapa = {
+        'ą':'a', 'ć':'c', 'ę':'e', 'ł':'l', 'ń':'n',
+        'ó':'o', 'ś':'s', 'ź':'z', 'ż':'z',
+        'Ą':'A', 'Ć':'C', 'Ę':'E', 'Ł':'L', 'Ń':'N',
+        'Ó':'O', 'Ś':'S', 'Ź':'Z', 'Ż':'Z'
+    }
+    return ''.join(mapa.get(c, c) for c in tekst)
+
+def popraw_slowa(slowo):
+    if slowo in POPULARNE_SLOWA:
+        return slowo
+    kandydaci = []
+    for wzorzec in POPULARNE_SLOWA:
+        if usun_znaki_polskie(wzorzec) == usun_znaki_polskie(slowo):
+            kandydaci.append(wzorzec)
+    if kandydaci:
+        return min(kandydaci, key=len)
+    return slowo
+
+def popraw_ortografie(query):
+    slowa = query.split()
+    poprawione = [popraw_slowa(s) for s in slowa]
+    return ' '.join(poprawione)
+
+def czy_sensowne(query):
+    czyste = oczysc_tekst(query)
+    if len(czyste) < 3:
+        return False
+    slowa = czyste.split()
+    sensowne = [w for w in slowa if w not in STOPWORDS_POLSKIE]
+    if not sensowne:
+        return False
+    if re.fullmatch(r'[a-ząćęłńóśźż0-9\s]+', czyste) is None:
+        return False
+    if len(sensowne) > 1:
+        return True
+    if sensowne[0] in POPULARNE_SLOWA:
+        return True
+    return False
+
+def znajdz_podobne_pytanie(query, znane_pytania):
+    czyste = oczysc_tekst(query)
+    for p in znane_pytania:
+        if SequenceMatcher(None, czyste, oczysc_tekst(p)).ratio() > 0.9:
+            return p
+    return None
+
+def przeszukaj_google(query, ile_wynikow=100):
+    wyniki = []
+    try:
+        for url in search(query, num_results=ile_wynikow, lang="pl"):
+            try:
+                r = requests.get(url, timeout=5)
+                soup = BeautifulSoup(r.text, 'html.parser')
+                tekst = soup.get_text(separator=' ', strip=True)
+                wyniki.append(tekst)
+            except:
+                continue
+    except Exception as e:
+        print(f"Błąd przy wyszukiwaniu: {e}")
+    return wyniki[:100]
+
+def wybierz_5_najtrafniejszych(query, teksty):
+    vectorizer = TfidfVectorizer(stop_words=STOPWORDS_POLSKIE)
+    if not teksty:
+        return []
+    tfidf = vectorizer.fit_transform(teksty + [query])
+    zapytanie = tfidf[-1]
+    dokumenty = tfidf[:-1]
+    podobienstwo = cosine_similarity(zapytanie, dokumenty).flatten()
+    top5 = podobienstwo.argsort()[-5:][::-1]
+    return [teksty[i] for i in top5]
+
+def podsumuj_odpowiedzi(odpowiedzi):
+    zdania = []
+    for odp in odpowiedzi:
+        zdania += re.split(r'[.?!]', odp)
+    zdania = [z.strip() for z in zdania if z.strip()]
+    if not zdania:
+        return "Brak wystarczających informacji do podsumowania."
+    return max(zdania, key=lambda s: len(s.split()))
+
+def pytaj(tresc):
+    while True:
+        odpowiedz = input(f"{tresc} (tak/nie): ").strip().lower()
+        if odpowiedz in ['tak', 't', 'yes', 'y']:
+            return True
+        elif odpowiedz in ['nie', 'n', 'no']:
+            return False
+        else:
+            print("Proszę odpowiedzieć 'tak' lub 'nie'.")
+
+def main():
+    print("Witaj! Zadaj pytanie lub wpisz działanie matematyczne.")
+    opinie = wczytaj_opinie()
+    while True:
+        pytanie = input(">> ").strip()
+        if pytanie.lower() in ['exit', 'quit', 'koniec']:
+            print("Do zobaczenia!")
+            break
+        poprawione = popraw_ortografie(pytanie)
+        if pytanie != poprawione:
+            print(f"Poprawiono zapytanie na: {poprawione}")
+            pytanie = poprawione
+        if czy_dzialanie(pytanie):
+            wynik = wykonaj_dzialanie(pytanie)
+            if wynik is not None:
+                print(f"Wynik działania: {wynik}")
+                continue
+            else:
+                print("Niepoprawne działanie matematyczne.")
+                continue
+        if not czy_sensowne(pytanie):
+            print("Zapytanie jest zbyt krótkie lub niezrozumiałe. Proszę podaj bardziej precyzyjne pytanie.")
+            continue
+        if znajdz_podobne_pytanie(pytanie, opinie["zle"]):
+            print("To pytanie zostało wcześniej oznaczone jako nieprzydatne. Proszę zadaj inne pytanie.")
+            continue
+        print("Przeszukuję Internet, proszę czekać...")
+        wyniki = przeszukaj_google(pytanie, ile_wynikow=100)
+        if not wyniki:
+            print("Nie udało się znaleźć odpowiednich informacji.")
+            continue
+        najlepsze = wybierz_5_najtrafniejszych(pytanie, wyniki)
+        if not najlepsze:
+            print("Nie znaleziono trafnych odpowiedzi.")
+            continue
+        print("Najtrafniejsze odpowiedzi:")
+        for i, odp in enumerate(najlepsze, 1):
+            print(f"{i}. - {odp[:300].strip()}...")
+        podsumowanie = podsumuj_odpowiedzi(najlepsze)
+        print("\nPodsumowanie:", podsumowanie)
+        if pytaj("Czy ta odpowiedź była przydatna?"):
+            opinie["dobre"][pytanie] = podsumowanie
+            zapisz_opinie(opinie)
+        else:
+            opinie["zle"][pytanie] = podsumowanie
+            zapisz_opinie(opinie)
+        if pytaj("Czy chcesz zapisać tę odpowiedź?"):
+            with open("zapisane_odpowiedzi.txt", "a", encoding="utf-8") as f:
+                f.write(f"Pytanie: {pytanie}\nOdpowiedź: {podsumowanie}\n\n")
+            print("Odpowiedź zapisana.")
+
+if __name__ == "__main__":
+    main()
