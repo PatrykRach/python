@@ -1,0 +1,184 @@
+import re
+import json
+import requests
+from bs4 import BeautifulSoup
+from googlesearch import search
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+FEEDBACK_FILE = "feedback.json"
+
+POLISH_STOPWORDS = {
+    'a', 'aby', 'ach', 'acz', 'aczkolwiek', 'aj', 'albo', 'ale', 'ależ', 'ani', 'aż',
+    'bardziej', 'bardzo', 'bo', 'bowiem', 'by', 'być', 'byli', 'bym', 'bywa', 'bywało',
+    'było', 'były', 'chociaż', 'czy', 'czyli', 'dla', 'do', 'gdy', 'gdyby', 'gdyż',
+    'i', 'ich', 'ile', 'im', 'inny', 'inne', 'innych', 'iż', 'ja', 'jak', 'jaka', 'jakby',
+    'jakie', 'jakiś', 'jako', 'je', 'jeden', 'jedna', 'jednak', 'jednakże', 'jego',
+    'jej', 'jemu', 'jest', 'jestem', 'jestes', 'jestesmy', 'jestli', 'jeśli',
+    'jeżeli', 'już', 'ją', 'każdy', 'kiedy', 'kimś', 'koło', 'lecz', 'lub', 'ma', 'mają',
+    'mam', 'mi', 'mną', 'mnie', 'mogą', 'moi', 'moim', 'może', 'można', 'mój', 'mu',
+    'my', 'na', 'nad', 'nam', 'nami', 'nas', 'nasi', 'nasz', 'nasza', 'nasze', 'naszego',
+    'naszych', 'nie', 'nic', 'nich', 'niech', 'niego', 'niej', 'niemu', 'nigdy', 'nim',
+    'nimi', 'niż', 'no', 'o', 'obok', 'od', 'około', 'on', 'ona', 'one', 'oni', 'ono',
+    'oraz', 'oto', 'po', 'pod', 'ponieważ', 'ponownie', 'poza', 'póki', 'przed', 'przede',
+    'przez', 'przy', 'również', 'sam', 'sama', 'się', 'skąd', 'są', 'ta', 'tak', 'taka',
+    'taki', 'takie', 'także', 'tam', 'te', 'tego', 'tej', 'temu', 'ten', 'teraz', 'też',
+    'to', 'tobie', 'tobą', 'toteż', 'trzeba', 'tu', 'tutaj', 'twoi', 'twoim', 'twój',
+    'ty', 'tych', 'tylko', 'tym', 'u', 'w', 'wam', 'wami', 'was', 'wasz', 'we', 'według',
+    'więc', 'więcej', 'wszyscy', 'wszystkich', 'wszystkie', 'wszystkim', 'wszystko',
+    'wtedy', 'wy', 'z', 'za', 'zapewne', 'ze', 'znowu', 'znów', 'został', 'żaden', 'że',
+    'żeby', 'żadna', 'żadne'
+}
+
+def clean_text(text):
+    text = text.lower()
+    text = re.sub(r'[^\w\sąćęłńóśźż]', '', text)
+    return text.strip()
+
+def load_feedback():
+    try:
+        with open(FEEDBACK_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"good": {}, "bad": {}}
+    except json.JSONDecodeError:
+        # Jeśli plik uszkodzony, zacznij od nowa
+        return {"good": {}, "bad": {}}
+
+def save_feedback(data):
+    with open(FEEDBACK_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+def czy_dzialanie_matematyczne(query):
+    # Działanie matematyczne może zawierać cyfry, spacje, +-*/().eE i przecinki
+    if re.fullmatch(r'[\d\s\.\+\-\*\/\(\)eE,]+', query):
+        return True
+    return False
+
+def oblicz_dzialanie(query):
+    try:
+        expr = query.replace(',', '.').replace(' ', '')
+        allowed_chars = "0123456789+-*/().eE"
+        if not all(c in allowed_chars for c in expr):
+            return None
+        wynik = eval(expr, {"__builtins__": None}, {})
+        return wynik
+    except:
+        return None
+
+def zapytanie_ma_sens(query):
+    cleaned = clean_text(query)
+    words = cleaned.split()
+    if len(words) < 2:
+        return False
+    sensowne_slowa = [w for w in words if w not in POLISH_STOPWORDS]
+    if not sensowne_slowa:
+        return False
+    # Sprawdzenie, czy zapytanie zawiera tylko litery, cyfry i spacje
+    if re.fullmatch(r'[a-ząćęłńóśźż0-9\s]+', cleaned) is None:
+        return False
+    return True
+
+def find_similar_question(query, known_questions):
+    from difflib import SequenceMatcher
+    cleaned_query = clean_text(query)
+    for q in known_questions:
+        ratio = SequenceMatcher(None, clean_text(q), cleaned_query).ratio()
+        if ratio > 0.8:
+            return q
+    return None
+
+def fetch_results(query):
+    results = []
+    try:
+        for url in search(query, num_results=20):
+            try:
+                page = requests.get(url, timeout=5)
+                soup = BeautifulSoup(page.text, "html.parser")
+                for p in soup.find_all("p"):
+                    text = p.get_text().strip()
+                    if 30 < len(text) < 500:
+                        results.append(text)
+            except requests.RequestException:
+                continue
+            except Exception:
+                continue
+    except Exception:
+        print(" Błąd podczas wyszukiwania w Google.")
+    return results
+
+def best_answers(query, paragraphs):
+    if not paragraphs:
+        return []
+    vect = TfidfVectorizer(stop_words=POLISH_STOPWORDS).fit_transform([query] + paragraphs)
+    similarities = cosine_similarity(vect[0:1], vect[1:]).flatten()
+    top_indices = similarities.argsort()[-5:][::-1]
+    return [paragraphs[i] for i in top_indices]
+
+def podsumuj(answers):
+    if not answers:
+        return ""
+    # Najdłuższy tekst jako podsumowanie
+    return max(answers, key=len)
+
+def inteligentna_odpowiedz(query):
+    query = query.strip()
+
+    if czy_dzialanie_matematyczne(query):
+        wynik = oblicz_dzialanie(query)
+        if wynik is not None:
+            print(f" Wynik działania: {wynik}")
+            return
+        else:
+            print(" Nie udało się obliczyć działania matematycznego.")
+            return
+
+    if not zapytanie_ma_sens(query):
+        print(" Podaj pełne i sensowne pytanie (min. 2 słowa, bez samych znaków specjalnych lub stopwords).")
+        return
+
+    feedback = load_feedback()
+
+    podobne = find_similar_question(query, feedback["good"])
+    if podobne:
+        odp = feedback["good"][podobne]
+        print(" Odpowiedź na podobne pytanie z bazy wiedzy:")
+        for a in odp["answers"]:
+            print(f"- {a}")
+        print(" Podsumowanie:", odp["summary"])
+        return
+
+    wyniki = fetch_results(query)
+    if not wyniki:
+        print(" Nie udało się znaleźć odpowiedzi.")
+        return
+
+    najlepsze = best_answers(query, wyniki)
+    podsumowanie = podsumuj(najlepsze)
+
+    print(" Najtrafniejsze odpowiedzi:")
+    for ans in najlepsze:
+        print(f"- {ans}")
+    print("\n Podsumowanie:", podsumowanie)
+
+    ocena = input("\nCzy ta odpowiedź była przydatna? (tak/nie): ").strip().lower()
+    if ocena == "tak":
+        feedback["good"][query] = {
+            "answers": najlepsze,
+            "summary": podsumowanie
+        }
+    elif ocena == "nie":
+        feedback["bad"][query] = {
+            "answers": najlepsze,
+            "summary": podsumowanie
+        }
+
+    save_feedback(feedback)
+
+if __name__ == "__main__":
+    print("=== Inteligentny Asystent (Python 3.11, Raspberry Pi) ===")
+    while True:
+        zapytanie = input("\nZadaj pytanie (lub wpisz 'koniec' aby zakończyć): ")
+        if zapytanie.lower() == "koniec":
+            break
+        inteligentna_odpowiedz(zapytanie)
