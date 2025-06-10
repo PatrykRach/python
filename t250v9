@@ -1,0 +1,176 @@
+import time
+import requests
+from bs4 import BeautifulSoup
+from googlesearch import search
+import re
+import difflib
+from sympy import sympify, sqrt
+from sympy.core.sympify import SympifyError
+from datetime import datetime
+
+# Rozbudowana lista polskich stopwords
+stop_words = {
+    'a', 'aby', 'ach', 'acz', 'aczkolwiek', 'aj', 'albo', 'ale', 'ależ', 'ani', 'aż',
+    'bardziej', 'bardzo', 'bo', 'bowiem', 'by', 'być', 'byli', 'bym', 'bywa', 'bywało',
+    'było', 'były', 'chociaż', 'czy', 'czyli', 'dla', 'do', 'gdy', 'gdyby', 'gdyż',
+    'i', 'ich', 'ile', 'im', 'inny', 'inne', 'innych', 'iż', 'ja', 'jak', 'jaka', 'jakby',
+    'jakie', 'jakiś', 'jako', 'je', 'jeden', 'jedna', 'jednak', 'jednakże', 'jego',
+    'jej', 'jemu', 'jest', 'jestem', 'jestes', 'jestesmy', 'jestli', 'jeśli',
+    'jeżeli', 'już', 'ją', 'każdy', 'kiedy', 'kimś', 'koło', 'lecz', 'lub', 'ma', 'mają',
+    'mam', 'mi', 'mną', 'mnie', 'mogą', 'moi', 'moim', 'może', 'można', 'mój', 'mu',
+    'my', 'na', 'nad', 'nam', 'nami', 'nas', 'nasi', 'nasz', 'nasza', 'nasze', 'naszego',
+    'naszych', 'nie', 'nic', 'nich', 'niech', 'niego', 'niej', 'niemu', 'nigdy', 'nim',
+    'nimi', 'niż', 'no', 'o', 'obok', 'od', 'około', 'on', 'ona', 'one', 'oni', 'ono',
+    'oraz', 'oto', 'po', 'pod', 'ponieważ', 'ponownie', 'poza', 'póki', 'przed', 'przede',
+    'przez', 'przy', 'również', 'sam', 'sama', 'się', 'skąd', 'są', 'ta', 'tak', 'taka',
+    'taki', 'takie', 'także', 'tam', 'te', 'tego', 'tej', 'temu', 'ten', 'teraz', 'też',
+    'to', 'tobie', 'tobą', 'toteż', 'trzeba', 'tu', 'tutaj', 'twoi', 'twoim', 'twój',
+    'ty', 'tych', 'tylko', 'tym', 'u', 'w', 'wam', 'wami', 'was', 'wasz', 'we', 'według',
+    'więc', 'więcej', 'wszyscy', 'wszystkich', 'wszystkie', 'wszystkim', 'wszystko',
+    'wtedy', 'wy', 'z', 'za', 'zapewne', 'ze', 'znowu', 'znów', 'został', 'żaden', 'że',
+    'żeby', 'żadna', 'żadne'
+}
+
+def czy_dzialanie_matematyczne(zapytanie):
+    return bool(re.search(r'\d', zapytanie)) and (
+        any(op in zapytanie for op in ['+', '-', '*', '/', '**', 'sqrt']) or
+        'pierwiastek' in zapytanie or 'potęga' in zapytanie
+    )
+
+def przetworz_zapytanie_na_wyrazenie(zapytanie):
+    zapytanie = zapytanie.lower()
+    zapytanie = zapytanie.replace('do potęgi', '**')
+    zapytanie = zapytanie.replace('potęga', '**')
+    zapytanie = re.sub(r'pierwiastk\w*\s+z\s*', 'sqrt(', zapytanie)
+    # Doprecyzowanie nawiasów w sqrt
+    if 'sqrt(' in zapytanie and not zapytanie.endswith(')'):
+        zapytanie += ')'
+    dozwolone = set('0123456789+-*/(). sqrt')
+    if not all(c in dozwolone for c in zapytanie.replace('**', '')):
+        print("Niedozwolone znaki w działaniu.")
+        exit()
+    return zapytanie
+
+def tokenizuj_slowa(tekst):
+    return re.findall(r'\b\w+\b', tekst.lower())
+
+def podsumuj(zdania):
+    if not zdania:
+        return "Brak wystarczających danych do podsumowania."
+    wszystkie = ' '.join(zdania)
+    zdania_kandydat = re.split(r'[.!?]', wszystkie)
+    return max(zdania_kandydat, key=lambda zd: difflib.SequenceMatcher(None, zd, wszystkie).ratio(), default="")
+
+def czy_pytanie_konkretne(zapytanie):
+    # Usuwamy znaki specjalne na potrzeby analizy
+    zapytanie_czyste = re.sub(r'[^a-zA-Z0-9ąćęłńóśźżĄĆĘŁŃÓŚŹŻ\s]', '', zapytanie).strip()
+    slowa = zapytanie_czyste.split()
+
+    # Odrzucamy bardzo krótkie pytania (mniej niż 3 słowa)
+    if len(slowa) < 3:
+        return False
+
+    # Odrzucamy pytania z samego "co to", "czym jest", jeśli to jedyne słowa
+    pytajace_frazy = ['co to', 'czym jest', 'co to jest', 'jakie jest', 'kto jest', 'jaka jest', 'dlaczego jest']
+    for fraza in pytajace_frazy:
+        if zapytanie_czyste.startswith(fraza) and len(slowa) == len(fraza.split()):
+            return False
+
+    # Odrzucamy pytania będące tylko jednym słowem (np. 'fotosynteza')
+    if len(slowa) == 1:
+        return False
+
+    return True
+
+# --- START programu ---
+
+zapytanie = input("Co chcesz wiedzieć? ").lower().strip()
+
+if not re.search(r'[a-ząćęłńóśźż]', zapytanie):
+    print("Twoje pytanie nie zawiera liter. Spróbuj jeszcze raz.")
+    exit()
+
+if not czy_pytanie_konkretne(zapytanie):
+    print("Twoje pytanie jest zbyt ogólne lub niepełne. Spróbuj bardziej konkretne pytanie.")
+    exit()
+
+if czy_dzialanie_matematyczne(zapytanie):
+    try:
+        wyrazenie = przetworz_zapytanie_na_wyrazenie(zapytanie)
+        wynik = sympify(wyrazenie).evalf()
+        print(f"Wynik: {wynik}")
+        exit()
+    except SympifyError:
+        print("Nie udało się policzyć tego działania.")
+        exit()
+
+czyste = re.sub(r'[^a-zA-Z0-9ąćęłńóśźżĄĆĘŁŃÓŚŹŻ\s]', '', zapytanie)
+slowa = tokenizuj_slowa(czyste)
+kluczowe = [s for s in slowa if len(s) > 2 and s not in stop_words]
+
+if len(kluczowe) < 2:
+    print("Twoje pytanie jest zbyt krótkie lub niejednoznaczne.")
+    exit()
+
+frazy_pomocnicze = ['definicja', 'przykład', 'co to jest', 'oznacza', 'kim jest', 'czym jest']
+wszystkie_odpowiedzi = []
+
+print("\nSzukam odpowiedzi... To może chwilę potrwać.\n")
+
+for url in search(zapytanie, num_results=20, lang="pl"):
+    try:
+        r = requests.get(url, timeout=5)
+        if r.status_code != 200:
+            continue
+        r.encoding = 'utf-8'
+        soup = BeautifulSoup(r.text, 'html.parser')
+        tekst = soup.get_text().lower()
+        zdania = re.split(r'[.!?]', tekst)
+
+        dopasowane = [
+            zd.strip() for zd in zdania
+            if any(k in zd for k in kluczowe + frazy_pomocnicze)
+        ]
+
+        wszystkie_odpowiedzi.extend(dopasowane)
+        time.sleep(0.3)
+
+    except Exception as e:
+        print(f"Błąd ładowania {url}: {e}")
+
+
+wszystkie_odpowiedzi = list(set(wszystkie_odpowiedzi))
+
+if not wszystkie_odpowiedzi:
+    print("Nie znaleziono żadnych trafnych odpowiedzi.")
+    exit()
+
+trafne_top5 = sorted(
+    wszystkie_odpowiedzi,
+    key=lambda zd: difflib.SequenceMatcher(None, zd, zapytanie).ratio(),
+    reverse=True
+)[:5]
+
+# Pokaż odpowiedzi
+print("\nNajtrafniejsze odpowiedzi:\n")
+for zd in trafne_top5:
+    print(zd.strip())
+
+# Podsumowanie
+final = podsumuj(trafne_top5).strip()
+print(f"\nNajbardziej trafna odpowiedź to:\n{final}")
+
+# Zapytanie o zapis
+czy_zapisac = input("\nCzy chcesz zapisać te odpowiedzi do pliku? (tak/nie): ").strip().lower()
+if czy_zapisac in ['tak', 't', 'yes', 'y']:
+    teraz = datetime.now().strftime('%Y-%m-%d_%H-%M')
+    nazwa_pliku = f"odpowiedz_{teraz}.txt"
+    with open(nazwa_pliku, 'w', encoding='utf-8') as f:
+        f.write(f"Zapytanie: {zapytanie}\n\n")
+        f.write("Najtrafniejsze odpowiedzi:\n")
+        for zd in trafne_top5:
+            f.write(f"- {zd.strip()}\n")
+        f.write(f"\nNajbardziej trafna odpowiedź:\n{final}\n")
+    print(f"\nZapisano do pliku: {nazwa_pliku}")
+else:
+    print("Nie zapisano.")
