@@ -1,0 +1,177 @@
+import re
+import json
+import requests
+from bs4 import BeautifulSoup
+from googlesearch import search
+from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
+from sumy.parsers.plaintext import PlaintextParser
+from sumy.nlp.tokenizers import Tokenizer
+from sumy.summarizers.lsa import LsaSummarizer
+
+PLIK_OPINII = "opinie.json"
+STOP_SLOWA_POLSKIE = [ 'a', 'aby', 'ach', 'acz', 'aczkolwiek', 'aj', 'albo', 'ale', 'ależ', 'ani', 'aż',
+    'bardziej', 'bardzo', 'bo', 'bowiem', 'by', 'być', 'byli', 'bym', 'bywa', 'bywało',
+    'było', 'były', 'chociaż', 'czy', 'czyli', 'dla', 'do', 'gdy', 'gdyby', 'gdyż',
+    'i', 'ich', 'ile', 'im', 'inny', 'inne', 'innych', 'iż', 'ja', 'jak', 'jaka', 'jakby',
+    'jakie', 'jakiś', 'jako', 'je', 'jeden', 'jedna', 'jednak', 'jednakże', 'jego',
+    'jej', 'jemu', 'jest', 'jestem', 'jestes', 'jestesmy', 'jestli', 'jeśli',
+    'jeżeli', 'już', 'ją', 'każdy', 'kiedy', 'kimś', 'koło', 'lecz', 'lub', 'ma', 'mają',
+    'mam', 'mi', 'mną', 'mnie', 'mogą', 'moi', 'moim', 'może', 'można', 'mój', 'mu',
+    'my', 'na', 'nad', 'nam', 'nami', 'nas', 'nasi', 'nasz', 'nasza', 'nasze', 'naszego',
+    'naszych', 'nie', 'nic', 'nich', 'niech', 'niego', 'niej', 'niemu', 'nigdy', 'nim',
+    'nimi', 'niż', 'no', 'o', 'obok', 'od', 'około', 'on', 'ona', 'one', 'oni', 'ono',
+    'oraz', 'oto', 'po', 'pod', 'ponieważ', 'ponownie', 'poza', 'póki', 'przed', 'przede',
+    'przez', 'przy', 'również', 'sam', 'sama', 'się', 'skąd', 'są', 'ta', 'tak', 'taka',
+    'taki', 'takie', 'także', 'tam', 'te', 'tego', 'tej', 'temu', 'ten', 'teraz', 'też',
+    'to', 'tobie', 'tobą', 'toteż', 'trzeba', 'tu', 'tutaj', 'twoi', 'twoim', 'twój',
+    'ty', 'tych', 'tylko', 'tym', 'u', 'w', 'wam', 'wami', 'was', 'wasz', 'we', 'według',
+    'więc', 'więcej', 'wszyscy', 'wszystkich', 'wszystkie', 'wszystkim', 'wszystko',
+    'wtedy', 'wy', 'z', 'za', 'zapewne', 'ze', 'znowu', 'znów', 'został', 'żaden', 'że',
+    'żeby', 'żadna', 'żadne']
+
+def oczysc_tekst(tekst):
+    tekst = tekst.lower()
+    tekst = re.sub(r'[^\w\sąćęłńóśźż]', '', tekst)
+    return tekst.strip()
+
+def czy_dzialanie_matematyczne(zapytanie):
+    if re.fullmatch(r'[\d\s\.\+\-\*\/\(\)eE,]+', zapytanie):
+        return True
+    if re.search(r'\b(ile to|jaki jest wynik)\b', zapytanie):
+        return True
+    return False
+
+def wykonaj_dzialanie_matematyczne(zapytanie):
+    try:
+        wyrazenie = zapytanie.replace(',', '.').replace(' ', '')
+        dozwolone = "0123456789+-*/().eE"
+        if not all(znak in dozwolone for znak in wyrazenie):
+            return None
+        wynik = eval(wyrazenie, {"__builtins__": None}, {})
+        return wynik
+    except:
+        return None
+
+def pobierz_tresc_strony(url):
+    try:
+        r = requests.get(url, timeout=5)
+        soup = BeautifulSoup(r.text, 'html.parser')
+        fragmenty = soup.find_all(['p', 'h1', 'h2', 'h3'])
+        teksty = [frag.get_text(separator=' ', strip=True) for frag in fragmenty]
+        return ' '.join(teksty)[:1500]  # Ograniczenie długości
+    except:
+        return ""
+
+def przeszukaj_google(zapytanie, ile_wynikow=20):
+    wyniki = []
+    for url in search(zapytanie, num_results=ile_wynikow, lang="pl"):
+        tresc = pobierz_tresc_strony(url)
+        if tresc:
+            wyniki.append(tresc)
+    return wyniki
+
+def wybierz_najlepsze_odpowiedzi(zapytanie, teksty):
+    model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+    zapytanie_embedding = model.encode(zapytanie)
+    embeddings_dokumentow = [model.encode(doc) for doc in teksty]
+
+    podobienstwa = [cosine_similarity([zapytanie_embedding], [doc_emb])[0][0] for doc_emb in embeddings_dokumentow]
+    najlepsze_idx = sorted(range(len(podobienstwa)), key=lambda i: podobienstwa[i], reverse=True)[:5]
+
+    return [teksty[i] for i in najlepsze_idx]
+
+def podsumuj_odpowiedzi(odpowiedzi):
+    parser = PlaintextParser.from_string(" ".join(odpowiedzi), Tokenizer("polish"))
+    summarizer = LsaSummarizer()
+    return " ".join([str(s) for s in summarizer(parser.document, 1)])
+
+def czy_sensowne_zapytanie(zapytanie):
+    czyste = oczysc_tekst(zapytanie)
+    slowa = czyste.split()
+    sensowne = [w for w in slowa if w not in STOP_SLOWA_POLSKIE]
+    return len(sensowne) > 2
+
+def zapytaj_uzytkownika(pytanie):
+    while True:
+        odpowiedz = input(f"{pytanie} (tak/nie): ").strip().lower()
+        if odpowiedz in ['tak', 't', 'yes', 'y']:
+            return True
+        elif odpowiedz in ['nie', 'n', 'no']:
+            return False
+        else:
+            print("Proszę odpowiedzieć 'tak' lub 'nie'.")
+
+def wczytaj_opinie():
+    try:
+        with open(PLIK_OPINII, "r", encoding="utf-8") as plik:
+            return json.load(plik)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"dobre": {}, "zle": {}}
+
+def zapisz_opinie(do_zapisu):
+    with open(PLIK_OPINII, "w", encoding="utf-8") as plik:
+        json.dump(do_zapisu, plik, indent=2, ensure_ascii=False)
+
+def main():
+    print("Witaj! Zadaj pytanie lub wpisz działanie matematyczne.")
+    opinie = wczytaj_opinie()
+
+    while True:
+        zapytanie = input("\nWpisz pytanie lub działanie ('exit' aby zakończyć): ").strip()
+        if zapytanie.lower() == "exit":
+            print("Do zobaczenia!")
+            break
+
+        if czy_dzialanie_matematyczne(zapytanie):
+            wynik = wykonaj_dzialanie_matematyczne(zapytanie)
+            if wynik is not None:
+                print(f"Wynik działania: {wynik}")
+                continue
+            else:
+                print("Nie udało się wykonać działania.")
+                continue
+
+        if not czy_sensowne_zapytanie(zapytanie):
+            print("Twoje pytanie jest zbyt krótkie lub niesensowne, spróbuj inaczej.")
+            continue
+
+        print("Szukam informacji w sieci...")
+
+        wyniki = przeszukaj_google(zapytanie)
+        if not wyniki:
+            print("Nie znalazłem żadnych wyników.")
+            kontynuuj = zapytaj_uzytkownika("Czy chcesz oznaczyć to pytanie jako złe (ignorowane)?")
+            if kontynuuj:
+                opinie["zle"][zapytanie] = ""
+                zapisz_opinie(opinie)
+            continue
+
+        najlepsze = wybierz_najlepsze_odpowiedzi(zapytanie, wyniki)
+        print("\n5 Najtrafniejszych odpowiedzi:")
+        for i, odp in enumerate(najlepsze, 1):
+            print(f"{i}. {odp}")
+
+        podsumowanie = podsumuj_odpowiedzi(najlepsze)
+        print("\nPodsumowanie:")
+        print(podsumowanie)
+
+        kontynuuj = zapytaj_uzytkownika("Czy odpowiedź była przydatna?")
+        if kontynuuj:
+            opinie["dobre"][zapytanie] = podsumowanie
+        else:
+            opinie["zle"][zapytanie] = ""
+        zapisz_opinie(opinie)
+
+        kontynuuj = zapytaj_uzytkownika("Czy chcesz zapisać pełną odpowiedź do pliku?")
+        if kontynuuj:
+            nazwa_pliku = input("Podaj nazwę pliku (np. odpowiedz.txt): ").strip()
+            try:
+                with open(nazwa_pliku, "w", encoding="utf-8") as f:
+                    f.write("\n\n".join(najlepsze))
+                print(f"Odpowiedź zapisana w pliku {nazwa_pliku}")
+            except Exception as e:
+                print(f"Błąd zapisu do pliku: {e}")
+
+if __name__ == "__main__":
+    main()
